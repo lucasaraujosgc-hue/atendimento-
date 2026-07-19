@@ -25,6 +25,17 @@ const upload = multer({ storage: storage });
 
 export const apiRouter = Router();
 
+import { execSync } from "child_process";
+
+apiRouter.get("/debug/push-db", (req, res) => {
+  try {
+    const out = execSync("npx drizzle-kit push", { encoding: "utf-8", env: process.env });
+    res.send(`<pre>${out}</pre>`);
+  } catch (err: any) {
+    res.status(500).send(`<pre>${err.message}\n${err.stdout}\n${err.stderr}</pre>`);
+  }
+});
+
 const JWT_SECRET = process.env.JWT_SECRET || "default_secret";
 
 apiRouter.post("/login", async (req, res) => {
