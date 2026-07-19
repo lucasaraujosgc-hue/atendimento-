@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from "react";
-import { Search, MoreVertical, Send, Paperclip, Smile, LayoutList, LayoutGrid, Clock, AlertTriangle, X, FileText, Image as ImageIcon, Music, Play, File as FileIcon } from "lucide-react";
+import { Search, MoreVertical, Forward, Tag, Send, Paperclip, Smile, LayoutList, LayoutGrid, Clock, AlertTriangle, X, FileText, Image as ImageIcon, Music, Play, File as FileIcon } from "lucide-react";
 import { io } from "socket.io-client";
 
 type Ticket = {
@@ -287,8 +287,16 @@ export function Chat() {
                       {tickets.find((t) => t.id === selectedTicket)?.name}
                     </h2>
                   </div>
-                  <div className="flex items-center space-x-4">
-                    <button className="text-slate-400 hover:text-slate-600">
+                  <div className="flex items-center space-x-2">
+                    <button className="flex items-center space-x-1 px-3 py-1.5 text-sm font-medium text-slate-600 bg-slate-100 hover:bg-slate-200 rounded-lg transition-colors">
+                      <Forward className="h-4 w-4" />
+                      <span>Encaminhar</span>
+                    </button>
+                    <button className="flex items-center space-x-1 px-3 py-1.5 text-sm font-medium text-slate-600 bg-slate-100 hover:bg-slate-200 rounded-lg transition-colors">
+                      <Tag className="h-4 w-4" />
+                      <span>Tags</span>
+                    </button>
+                    <button className="p-2 text-slate-400 hover:text-slate-600 rounded-lg hover:bg-slate-100 transition-colors ml-2">
                       <MoreVertical className="h-5 w-5" />
                     </button>
                   </div>

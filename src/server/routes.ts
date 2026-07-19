@@ -286,7 +286,7 @@ apiRouter.post("/tickets/:id/send", upload.array("files"), async (req, res) => {
     }
 
     // Update ticket
-    await db.update(tickets).set({ lastMessage: text || (files?.length ? "Mídia enviada" : ""), updatedAt: new Date().toISOString() }).where(eq(tickets.id, ticket.id));
+    await db.update(tickets).set({ lastMessage: text || (files?.length ? "Mídia enviada" : ""), updatedAt: new Date() }).where(eq(tickets.id, ticket.id));
 
     res.json(mainMessageSaved || { success: true });
   } catch (error) {

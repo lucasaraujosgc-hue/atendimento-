@@ -16,26 +16,21 @@ export async function initWhatsApp(io: any) {
 
   sock = makeWASocket({
     auth: state,
-    printQRInTerminal: true,
-    logger: pino({ level: "silent" }) as any,
+    printQRInTerminal: false,
+    logger: pino({ level: "error" }) as any,
   });
 
   sock.ev.on("connection.update", (update: any) => {
     const { connection, lastDisconnect, qr } = update;
-
     if (qr) {
       currentQr = qr;
       connectionStatus = "qr";
       io.emit("whatsapp:state", { state: "qr", qr: currentQr });
     }
-
     if (connection === "close") {
       const shouldReconnect = (lastDisconnect?.error as Boom)?.output?.statusCode !== DisconnectReason.loggedOut;
-      console.log("Connection closed due to ", lastDisconnect?.error, ", reconnecting ", shouldReconnect);
-      
       connectionStatus = "disconnected";
       io.emit("whatsapp:state", { state: "disconnected" });
-
       if (shouldReconnect) {
         initWhatsApp(io);
       } else {
@@ -44,7 +39,6 @@ export async function initWhatsApp(io: any) {
         }
       }
     } else if (connection === "open") {
-      console.log("Opened connection");
       connectionStatus = "connected";
       currentQr = null;
       io.emit("whatsapp:state", { state: "connected" });
@@ -53,18 +47,65 @@ export async function initWhatsApp(io: any) {
 
   sock.ev.on("creds.update", saveCreds);
 
+  sock.ev.on("contacts.upsert", async (contactsData: any) => {
+    for (const contactData of contactsData) {
+      try {
+        if (contactData.id && contactData.id.endsWith('@s.whatsapp.net')) {
+          const senderName = contactData.name || contactData.pushname || contactData.notify || contactData.id.split('@')[0];
+          let contact = await db.select().from(contacts).where(eq(contacts.number, contactData.id)).then(res => res[0]);
+          if (!contact) {
+            await db.insert(contacts).values({
+              name: senderName,
+              number: contactData.id,
+            });
+          }
+        }
+      } catch (err) {
+        console.error("Error upserting contact", err);
+      }
+    }
+  });
+
+  sock.ev.on("messaging-history.set", async (history: any) => {
+    try {
+      if (history.contacts) {
+        for (const contactData of history.contacts) {
+          if (contactData.id && contactData.id.endsWith('@s.whatsapp.net')) {
+            const senderName = contactData.name || contactData.pushname || contactData.notify || contactData.id.split('@')[0];
+            let contact = await db.select().from(contacts).where(eq(contacts.number, contactData.id)).then(res => res[0]);
+            if (!contact) {
+              await db.insert(contacts).values({
+                name: senderName,
+                number: contactData.id,
+              });
+            }
+          }
+        }
+      }
+      if (history.messages) {
+        for (const msg of history.messages) {
+          if (msg.key.remoteJid && msg.key.remoteJid.endsWith('@s.whatsapp.net')) {
+             await handleIncomingMessage(msg, io, true);
+          }
+        }
+      }
+    } catch (err) {
+      console.error("Error setting messaging history", err);
+    }
+  });
+
   sock.ev.on("messages.upsert", async (m: any) => {
     if (m.type === "notify") {
       for (const msg of m.messages) {
         if (msg.key.remoteJid && msg.key.remoteJid.endsWith('@s.whatsapp.net')) {
-           await handleIncomingMessage(msg, io);
+           await handleIncomingMessage(msg, io, false);
         }
       }
     }
   });
 }
 
-async function handleIncomingMessage(msg: any, io: any) {
+async function handleIncomingMessage(msg: any, io: any, isHistory: boolean = false) {
   try {
     const remoteJid = msg.key.remoteJid;
     const fromMe = msg.key.fromMe;
@@ -75,7 +116,7 @@ async function handleIncomingMessage(msg: any, io: any) {
     if (!contact) {
       let profilePicUrl = undefined;
       try {
-        profilePicUrl = await sock.profilePictureUrl(remoteJid, 'image');
+        if (!isHistory) profilePicUrl = await sock.profilePictureUrl(remoteJid, 'image');
       } catch (err) {
         // Ignore if no profile picture
       }
@@ -97,7 +138,9 @@ async function handleIncomingMessage(msg: any, io: any) {
       }).returning();
       ticket = newTicket;
     } else {
-      await db.update(tickets).set({ lastMessage: getMessageText(msg), updatedAt: new Date().toISOString() }).where(eq(tickets.id, ticket.id));
+      if (!isHistory) {
+        await db.update(tickets).set({ lastMessage: getMessageText(msg), updatedAt: new Date() }).where(eq(tickets.id, ticket.id));
+      }
     }
 
     // Download media if any
@@ -106,7 +149,7 @@ async function handleIncomingMessage(msg: any, io: any) {
     let fileName = undefined;
     
     const messageContent = msg.message;
-    if (messageContent) {
+    if (messageContent && !isHistory) {
       const mType = Object.keys(messageContent)[0];
       if (mType === 'imageMessage' || mType === 'videoMessage' || mType === 'audioMessage' || mType === 'documentMessage') {
         const buffer = await downloadMediaMessage(msg, 'buffer', { }, { 
@@ -130,25 +173,30 @@ async function handleIncomingMessage(msg: any, io: any) {
     }
 
     // Save message
-    const [savedMsg] = await db.insert(messages).values({
-      id: msg.key.id,
-      ticketId: ticket.id,
-      contactId: contact.id,
-      body: getMessageText(msg) || "",
-      fromMe: fromMe,
-      senderName: senderName,
-      mediaType: mediaType !== "text" ? mediaType : undefined,
-      mediaUrl,
-      fileName,
-    }).returning();
+    const msgExists = await db.select().from(messages).where(eq(messages.id, msg.key.id)).then(res => res[0]);
+    if (!msgExists) {
+      const [savedMsg] = await db.insert(messages).values({
+        id: msg.key.id,
+        ticketId: ticket.id,
+        contactId: contact.id,
+        body: getMessageText(msg) || "",
+        fromMe: fromMe,
+        senderName: senderName,
+        mediaType: mediaType !== "text" ? mediaType : undefined,
+        mediaUrl,
+        fileName,
+        createdAt: new Date(msg.messageTimestamp ? msg.messageTimestamp * 1000 : Date.now()),
+      }).returning();
 
-    // Broadcast to UI
-    io.emit("whatsapp:message", {
-      ticket,
-      contact,
-      message: savedMsg
-    });
-
+      // Broadcast to UI
+      if (!isHistory) {
+        io.emit("whatsapp:message", {
+          ticket,
+          contact,
+          message: savedMsg
+        });
+      }
+    }
   } catch (error) {
     console.error("Error handling incoming message:", error);
   }
