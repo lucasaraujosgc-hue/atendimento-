@@ -1,4 +1,4 @@
-import { makeWASocket, DisconnectReason, useMultiFileAuthState, downloadMediaMessage } from "@whiskeysockets/baileys";
+import { makeWASocket, DisconnectReason, useMultiFileAuthState, downloadMediaMessage, jidNormalizedUser } from "@whiskeysockets/baileys";
 import { Boom } from "@hapi/boom";
 import pino from "pino";
 import fs from "fs";
@@ -9,120 +9,161 @@ import { eq } from "drizzle-orm";
 
 let sock: any = null;
 let currentQr: string | null = null;
-let connectionStatus: "connecting" | "qr" | "connected" | "disconnected" = "disconnected";
+let connectionStatus: "connecting" | "qr" | "connected" | "disconnected" | "reconnecting" | "failed" = "disconnected";
+let reconnectAttempts = 0;
+const MAX_RECONNECT_ATTEMPTS = 10;
+let isInitializing = false;
+
+function isValidContact(jid: string) {
+  if (!jid) return false;
+  return jid.endsWith('@s.whatsapp.net') || jid.endsWith('@lid');
+}
 
 export async function initWhatsApp(io: any) {
-  const { state, saveCreds } = await useMultiFileAuthState("auth_info_baileys");
+  if (isInitializing) return;
+  isInitializing = true;
+  connectionStatus = "connecting";
+  io.emit("whatsapp:state", { state: connectionStatus });
 
-  sock = makeWASocket({
-    auth: state,
-    printQRInTerminal: false,
-    logger: pino({ level: "error" }) as any,
-  });
+  try {
+    const { state, saveCreds } = await useMultiFileAuthState("auth_info_baileys");
+    sock = makeWASocket({
+      auth: state,
+      printQRInTerminal: false,
+      logger: pino({ level: "error" }) as any,
+    });
 
-  sock.ev.on("connection.update", (update: any) => {
-    const { connection, lastDisconnect, qr } = update;
-    if (qr) {
-      currentQr = qr;
-      connectionStatus = "qr";
-      io.emit("whatsapp:state", { state: "qr", qr: currentQr });
-    }
-    if (connection === "close") {
-      const shouldReconnect = (lastDisconnect?.error as Boom)?.output?.statusCode !== DisconnectReason.loggedOut;
-      connectionStatus = "disconnected";
-      io.emit("whatsapp:state", { state: "disconnected" });
-      if (shouldReconnect) {
-        initWhatsApp(io);
-      } else {
-        if (fs.existsSync("auth_info_baileys")) {
-           fs.rmSync("auth_info_baileys", { recursive: true, force: true });
-        }
+    sock.ev.on("connection.update", (update: any) => {
+      const { connection, lastDisconnect, qr } = update;
+      if (qr) {
+        currentQr = qr;
+        connectionStatus = "qr";
+        io.emit("whatsapp:state", { state: "qr", qr: currentQr });
       }
-    } else if (connection === "open") {
-      connectionStatus = "connected";
-      currentQr = null;
-      io.emit("whatsapp:state", { state: "connected" });
-    }
-  });
-
-  sock.ev.on("creds.update", saveCreds);
-
-  sock.ev.on("contacts.upsert", async (contactsData: any) => {
-    for (const contactData of contactsData) {
-      try {
-        if (contactData.id && contactData.id.endsWith('@s.whatsapp.net')) {
-          const senderName = contactData.name || contactData.pushname || contactData.notify || contactData.id.split('@')[0];
-          let contact = await db.select().from(contacts).where(eq(contacts.number, contactData.id)).then(res => res[0]);
-          if (!contact) {
-            await db.insert(contacts).values({
-              name: senderName,
-              number: contactData.id,
-            });
+      if (connection === "close") {
+        currentQr = null;
+        const statusCode = (lastDisconnect?.error as Boom)?.output?.statusCode;
+        const shouldReconnect = statusCode !== DisconnectReason.loggedOut;
+        
+        if (shouldReconnect) {
+          if (reconnectAttempts < MAX_RECONNECT_ATTEMPTS) {
+            connectionStatus = "reconnecting";
+            io.emit("whatsapp:state", { state: "reconnecting" });
+            const delay = Math.min(1000 * Math.pow(2, reconnectAttempts), 60000);
+            reconnectAttempts++;
+            console.log(`Reconnecting in ${delay}ms... (Attempt ${reconnectAttempts}/${MAX_RECONNECT_ATTEMPTS})`);
+            setTimeout(() => {
+              isInitializing = false;
+              initWhatsApp(io);
+            }, delay);
+          } else {
+            connectionStatus = "failed";
+            io.emit("whatsapp:state", { state: "failed" });
+            console.error("Max reconnect attempts reached.");
+            isInitializing = false;
           }
+        } else {
+          connectionStatus = "disconnected";
+          io.emit("whatsapp:state", { state: "disconnected" });
+          if (fs.existsSync("auth_info_baileys")) {
+             fs.rmSync("auth_info_baileys", { recursive: true, force: true });
+          }
+          isInitializing = false;
         }
-      } catch (err) {
-        console.error("Error upserting contact", err);
+      } else if (connection === "open") {
+        reconnectAttempts = 0;
+        connectionStatus = "connected";
+        currentQr = null;
+        isInitializing = false;
+        io.emit("whatsapp:state", { state: "connected" });
       }
-    }
-  });
+    });
 
-  sock.ev.on("messaging-history.set", async (history: any) => {
-    try {
-      if (history.contacts) {
-        for (const contactData of history.contacts) {
-          if (contactData.id && contactData.id.endsWith('@s.whatsapp.net')) {
-            const senderName = contactData.name || contactData.pushname || contactData.notify || contactData.id.split('@')[0];
-            let contact = await db.select().from(contacts).where(eq(contacts.number, contactData.id)).then(res => res[0]);
+    sock.ev.on("creds.update", saveCreds);
+
+    sock.ev.on("contacts.upsert", async (contactsData: any) => {
+      for (const contactData of contactsData) {
+        try {
+          if (isValidContact(contactData.id)) {
+            const normalizedId = jidNormalizedUser(contactData.id);
+            const senderName = contactData.name || contactData.pushname || contactData.notify || normalizedId.split('@')[0];
+            let contact = await db.select().from(contacts).where(eq(contacts.number, normalizedId)).then(res => res[0]);
             if (!contact) {
               await db.insert(contacts).values({
                 name: senderName,
-                number: contactData.id,
+                number: normalizedId,
               });
             }
           }
+        } catch (err) {
+          console.error("Error upserting contact", err);
         }
       }
-      if (history.messages) {
-        for (const msg of history.messages) {
-          if (msg.key.remoteJid && msg.key.remoteJid.endsWith('@s.whatsapp.net')) {
-             await handleIncomingMessage(msg, io, true);
+    });
+
+    sock.ev.on("messaging-history.set", async (history: any) => {
+      try {
+        if (history.contacts) {
+          for (const contactData of history.contacts) {
+            if (isValidContact(contactData.id)) {
+              const normalizedId = jidNormalizedUser(contactData.id);
+              const senderName = contactData.name || contactData.pushname || contactData.notify || normalizedId.split('@')[0];
+              let contact = await db.select().from(contacts).where(eq(contacts.number, normalizedId)).then(res => res[0]);
+              if (!contact) {
+                await db.insert(contacts).values({
+                  name: senderName,
+                  number: normalizedId,
+                });
+              }
+            }
+          }
+        }
+        if (history.messages) {
+          for (const msg of history.messages) {
+            if (msg.key.remoteJid && isValidContact(msg.key.remoteJid)) {
+               await handleIncomingMessage(msg, io, true);
+            }
+          }
+        }
+      } catch (err) {
+        console.error("Error setting messaging history", err);
+      }
+    });
+
+    sock.ev.on("messages.upsert", async (m: any) => {
+      if (m.type === "notify") {
+        for (const msg of m.messages) {
+          if (msg.key.remoteJid && isValidContact(msg.key.remoteJid)) {
+             await handleIncomingMessage(msg, io, false);
           }
         }
       }
-    } catch (err) {
-      console.error("Error setting messaging history", err);
-    }
-  });
-
-  sock.ev.on("messages.upsert", async (m: any) => {
-    if (m.type === "notify") {
-      for (const msg of m.messages) {
-        if (msg.key.remoteJid && msg.key.remoteJid.endsWith('@s.whatsapp.net')) {
-           await handleIncomingMessage(msg, io, false);
-        }
-      }
-    }
-  });
+    });
+  } catch (err) {
+    console.error("Error in initWhatsApp", err);
+    isInitializing = false;
+  }
 }
 
 async function handleIncomingMessage(msg: any, io: any, isHistory: boolean = false) {
   try {
     const remoteJid = msg.key.remoteJid;
+    const normalizedJid = jidNormalizedUser(remoteJid);
     const fromMe = msg.key.fromMe;
-    const senderName = msg.pushName || remoteJid.split('@')[0];
+    const senderName = msg.pushName || normalizedJid.split('@')[0];
     
     // Get or create contact
-    let contact = await db.select().from(contacts).where(eq(contacts.number, remoteJid)).then(res => res[0]);
+    let contact = await db.select().from(contacts).where(eq(contacts.number, normalizedJid)).then(res => res[0]);
     if (!contact) {
       let profilePicUrl = undefined;
       try {
-        if (!isHistory) profilePicUrl = await sock.profilePictureUrl(remoteJid, 'image');
+        if (!isHistory) profilePicUrl = await sock.profilePictureUrl(normalizedJid, 'image');
       } catch (err) {
         // Ignore if no profile picture
       }
       const [newContact] = await db.insert(contacts).values({
         name: senderName,
-        number: remoteJid,
+        number: normalizedJid,
         profilePicUrl
       }).returning();
       contact = newContact;
@@ -204,9 +245,7 @@ async function handleIncomingMessage(msg: any, io: any, isHistory: boolean = fal
 
 function getMessageText(msg: any) {
   if (!msg.message) return "";
-  return msg.message.conversation || msg.message.extendedTextMessage?.text || msg.message.imageMessage?.caption || msg.message.videoMessage?.caption || "";
-}
-
+  return msg.message.conversation || msg.message.extendedTextMessage?.text || msg.message.imageMessage?.caption || msg.message.videoMessage?.caption || "";}
 function getExtension(type: string, content: any) {
   if (type === 'imageMessage') return 'jpeg';
   if (type === 'videoMessage') return 'mp4';
@@ -221,7 +260,8 @@ function getExtension(type: string, content: any) {
 
 export async function sendWhatsAppMessage(to: string, message: any) {
   if (sock) {
-    return await sock.sendMessage(to, message);
+    const normalizedTo = jidNormalizedUser(to);
+    return await sock.sendMessage(normalizedTo, message);
   }
   throw new Error("WhatsApp socket not connected");
 }
@@ -236,11 +276,15 @@ export function getWhatsAppStatus() {
 export function resetWhatsAppConnection(io: any) {
   if (sock) {
     sock.logout();
-  } else {
+    sock = null;
+  }
+  
+  setTimeout(() => {
     if (fs.existsSync("auth_info_baileys")) {
       fs.rmSync("auth_info_baileys", { recursive: true, force: true });
     }
+    reconnectAttempts = 0;
+    isInitializing = false;
     initWhatsApp(io);
-  }
+  }, 1000);
 }
-
