@@ -142,10 +142,24 @@ export function Chat() {
         }
 
         try {
-          await fetch(`/api/tickets/${selectedTicket}/messages`, {
+          const res = await fetch(`/api/tickets/${selectedTicket}/send`, {
             method: "POST",
             body: formData
           });
+          const savedMsg = await res.json();
+          if (savedMsg && savedMsg.id) {
+             const newMsg: MessageInfo = {
+               id: savedMsg.id,
+               senderName: savedMsg.senderName,
+               text: savedMsg.body,
+               time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+               isMe: true,
+               type: savedMsg.mediaType || "text",
+               fileUrl: savedMsg.mediaUrl,
+               fileName: savedMsg.fileName
+             };
+             setMessages(prev => [...prev, newMsg]);
+          }
         } catch (err) {
           console.error("Error sending media message", err);
         }
@@ -153,24 +167,26 @@ export function Chat() {
       setAttachments([]);
       setMessageText("");
     } else {
-      const tempId = Date.now();
-      const newMsg: MessageInfo = {
-        id: tempId,
-        senderName: senderName,
-        text: finalMessage,
-        time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-        isMe: true,
-        type: "text"
-      };
-      setMessages(prev => [...prev, newMsg]);
       setMessageText("");
 
       try {
-        await fetch(`/api/tickets/${selectedTicket}/messages`, {
+        const res = await fetch(`/api/tickets/${selectedTicket}/send`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ text: finalMessage })
         });
+        const savedMsg = await res.json();
+        if (savedMsg && savedMsg.id) {
+           const newMsg: MessageInfo = {
+             id: savedMsg.id,
+             senderName: savedMsg.senderName,
+             text: savedMsg.body,
+             time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+             isMe: true,
+             type: "text"
+           };
+           setMessages(prev => [...prev, newMsg]);
+        }
       } catch (err) {
         console.error("Error sending message", err);
       }

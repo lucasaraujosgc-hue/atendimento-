@@ -102,36 +102,11 @@ export async function initWhatsApp(io: any) {
     });
 
     sock.ev.on("messaging-history.set", async (history: any) => {
-      try {
-        if (history.contacts) {
-          for (const contactData of history.contacts) {
-            if (isValidContact(contactData.id)) {
-              const normalizedId = jidNormalizedUser(contactData.id);
-              const senderName = contactData.name || contactData.pushname || contactData.notify || normalizedId.split('@')[0];
-              let contact = await db.select().from(contacts).where(eq(contacts.number, normalizedId)).then(res => res[0]);
-              if (!contact) {
-                await db.insert(contacts).values({
-                  name: senderName,
-                  number: normalizedId,
-                });
-              }
-            }
-          }
-        }
-        if (history.messages) {
-          for (const msg of history.messages) {
-            if (msg.key.remoteJid && isValidContact(msg.key.remoteJid)) {
-               await handleIncomingMessage(msg, io, true);
-            }
-          }
-        }
-      } catch (err) {
-        console.error("Error setting messaging history", err);
-      }
+      console.log("Messaging history received but ignored as per configuration.");
     });
 
     sock.ev.on("messages.upsert", async (m: any) => {
-      if (m.type === "notify") {
+      if (m.type === "notify" || m.type === "append") {
         for (const msg of m.messages) {
           if (msg.key.remoteJid && isValidContact(msg.key.remoteJid)) {
              await handleIncomingMessage(msg, io, false);
