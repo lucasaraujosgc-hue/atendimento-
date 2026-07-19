@@ -25,6 +25,9 @@ ENV NODE_ENV=production
 COPY --from=builder /app/package.json ./
 COPY --from=builder /app/package-lock.json ./
 COPY --from=builder /app/dist ./dist
+COPY --from=builder /app/drizzle ./drizzle
+COPY --from=builder /app/drizzle.config.ts ./
+COPY --from=builder /app/src/db/schema.ts ./src/db/schema.ts
 
 # Instala apenas dependências de produção
 RUN npm ci --omit=dev
