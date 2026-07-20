@@ -31,6 +31,43 @@ type MessageInfo = {
   fileName?: string;
 };
 
+const formatTime = (dateString: string) => {
+  if (!dateString) return "";
+  const date = new Date(dateString);
+  return date.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit', timeZone: 'America/Sao_Paulo' });
+};
+
+const formatDate = (dateString: string) => {
+  if (!dateString) return "";
+  const date = new Date(dateString);
+  const today = new Date();
+  const yesterday = new Date(today);
+  yesterday.setDate(yesterday.getDate() - 1);
+  
+  const dateStr = date.toLocaleDateString('pt-BR', { timeZone: 'America/Sao_Paulo' });
+  const todayStr = today.toLocaleDateString('pt-BR', { timeZone: 'America/Sao_Paulo' });
+  const yesterdayStr = yesterday.toLocaleDateString('pt-BR', { timeZone: 'America/Sao_Paulo' });
+  
+  if (dateStr === todayStr) return "Hoje";
+  if (dateStr === yesterdayStr) return "Ontem";
+  return dateStr;
+};
+
+const groupMessagesByDate = (messages: MessageInfo[]) => {
+  const groups: { date: string, messages: MessageInfo[] }[] = [];
+  let currentDate = '';
+  
+  messages.forEach(msg => {
+    const msgDate = new Date(msg.time).toLocaleDateString('pt-BR', { timeZone: 'America/Sao_Paulo' });
+    if (msgDate !== currentDate) {
+      currentDate = msgDate;
+      groups.push({ date: msgDate, messages: [] });
+    }
+    groups[groups.length - 1].messages.push(msg);
+  });
+  return groups;
+};
+
 export function Chat() {
   const [selectedTicket, setSelectedTicket] = useState<number | null>(null);
   const [viewMode, setViewMode] = useState<"list" | "kanban">("list");
@@ -103,7 +140,7 @@ export function Chat() {
           id: data.message.id,
           senderName: data.message.senderName,
           text: data.message.body,
-          time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+          time: data.message.createdAt || new Date().toISOString(),
           isMe: data.message.fromMe,
           type: data.message.mediaType || "text",
           fileUrl: data.message.mediaUrl,
@@ -172,7 +209,7 @@ export function Chat() {
                id: savedMsg.id,
                senderName: savedMsg.senderName,
                text: savedMsg.body,
-               time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+               time: savedMsg.createdAt || new Date().toISOString(),
                isMe: true,
                type: savedMsg.mediaType || "text",
                fileUrl: savedMsg.mediaUrl,
@@ -201,7 +238,7 @@ export function Chat() {
              id: savedMsg.id,
              senderName: savedMsg.senderName,
              text: savedMsg.body,
-             time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+             time: savedMsg.createdAt || new Date().toISOString(),
              isMe: true,
              type: "text"
            };
@@ -292,7 +329,7 @@ export function Chat() {
                         <div className="flex-1 min-w-0 flex flex-col">
                           <div className="flex justify-between items-start mb-1">
                             <h3 className="font-semibold text-slate-900 truncate">{ticket.name}</h3>
-                            <span className="text-[10px] text-slate-500 shrink-0 ml-2">{ticket.time}</span>
+                            <span className="text-[10px] text-slate-500 shrink-0 ml-2">{formatTime(ticket.time)}</span>
                           </div>
                           <div className="flex items-center space-x-2 mb-1">
                             {renderSlaBadge(ticket.slaStatus)}
@@ -369,51 +406,56 @@ export function Chat() {
                       <p className="text-sm">Nenhuma mensagem nesta conversa.</p>
                     </div>
                   ) : (
-                    messages.map((msg) => (
-                      <div key={msg.id} className={`flex ${msg.isMe ? "justify-end" : "justify-start"}`}>
-                        <div className={`p-2.5 md:p-3 rounded-lg shadow-sm max-w-[85%] md:max-w-[70%] relative ${msg.isMe ? "bg-[#dcf8c6] rounded-tr-none" : "bg-white rounded-tl-none"}`}>
-                          {!msg.isMe && (
-                            <span className="text-xs font-bold text-slate-600 block mb-1">{msg.senderName}</span>
-                          )}
-                          
-                          {msg.type === "text" && (
-                            <p className="text-sm text-slate-800 whitespace-pre-wrap leading-relaxed">{msg.text}</p>
-                          )}
-                          {msg.type === "image" && (
-                            <div className="flex flex-col mb-1">
-                              <img src={msg.fileUrl} alt="Received" className="max-w-full rounded-lg mb-2 object-contain bg-black/5" />
-                              {msg.text && <p className="text-sm text-slate-800 mt-1">{msg.text}</p>}
-                            </div>
-                          )}
-                          {msg.type === "audio" && (
-                            <div className="flex flex-col mb-1 min-w-[200px]">
-                              <audio controls src={msg.fileUrl} className="w-full h-10 mb-2" />
-                              {msg.text && <p className="text-sm text-slate-800 mt-1">{msg.text}</p>}
-                            </div>
-                          )}
-                          {msg.type === "pdf" && (
-                            <div className="flex flex-col mb-1 min-w-[200px]">
-                              <div className="flex items-center space-x-3 bg-white/50 p-3 rounded-lg border border-slate-200/50 mb-2 hover:bg-white transition-colors cursor-pointer" onClick={() => window.open(msg.fileUrl, '_blank')}>
-                                <FileText className="w-8 h-8 text-red-500 shrink-0" />
-                                <span className="text-sm font-medium text-slate-800 truncate" title={msg.fileName}>{msg.fileName}</span>
-                              </div>
-                              {msg.text && <p className="text-sm text-slate-800 mt-2">{msg.text}</p>}
-                            </div>
-                          )}
-                          {msg.type === "file" && (
-                            <div className="flex flex-col mb-1 min-w-[200px]">
-                              <div className="flex items-center space-x-3 bg-white/50 p-3 rounded-lg border border-slate-200/50 mb-2 hover:bg-white transition-colors cursor-pointer" onClick={() => window.open(msg.fileUrl, '_blank')}>
-                                <FileIcon className="w-8 h-8 text-slate-500 shrink-0" />
-                                <span className="text-sm font-medium text-slate-800 truncate" title={msg.fileName}>{msg.fileName}</span>
-                              </div>
-                              {msg.text && <p className="text-sm text-slate-800 mt-2">{msg.text}</p>}
-                            </div>
-                          )}
-                          
-                          <div className="flex items-center justify-end mt-1 space-x-1">
-                            <span className="text-[10px] text-slate-400">{msg.time}</span>
-                          </div>
+                    groupMessagesByDate(messages).map((group, index) => (
+                      <div key={index} className="space-y-4">
+                        <div className="flex justify-center my-4">
+                          <span className="bg-white/80 backdrop-blur-sm text-slate-600 text-[11px] font-medium px-3 py-1 rounded-full shadow-sm">
+                            {formatDate(group.date)}
+                          </span>
                         </div>
+                        {group.messages.map((msg) => (
+                          <div key={msg.id} className={`flex ${msg.isMe ? "justify-end" : "justify-start"}`}>
+                            <div className={`p-2.5 md:p-3 rounded-lg shadow-sm max-w-[85%] md:max-w-[70%] relative ${msg.isMe ? "bg-[#dcf8c6] rounded-tr-none" : "bg-white rounded-tl-none"}`}>
+                              {msg.type === "text" && (
+                                <p className="text-sm text-slate-800 whitespace-pre-wrap leading-relaxed">{msg.text}</p>
+                              )}
+                              {msg.type === "image" && (
+                                <div className="flex flex-col mb-1">
+                                  <img src={msg.fileUrl} alt="Received" className="max-w-full rounded-lg mb-2 object-contain bg-black/5" />
+                                  {msg.text && <p className="text-sm text-slate-800 mt-1">{msg.text}</p>}
+                                </div>
+                              )}
+                              {msg.type === "audio" && (
+                                <div className="flex flex-col mb-1 min-w-[200px]">
+                                  <audio controls src={msg.fileUrl} className="w-full h-10 mb-2" />
+                                  {msg.text && <p className="text-sm text-slate-800 mt-1">{msg.text}</p>}
+                                </div>
+                              )}
+                              {msg.type === "pdf" && (
+                                <div className="flex flex-col mb-1 min-w-[200px]">
+                                  <div className="flex items-center space-x-3 bg-white/50 p-3 rounded-lg border border-slate-200/50 mb-2 hover:bg-white transition-colors cursor-pointer" onClick={() => window.open(msg.fileUrl, '_blank')}>
+                                    <FileText className="w-8 h-8 text-red-500 shrink-0" />
+                                    <span className="text-sm font-medium text-slate-800 truncate" title={msg.fileName}>{msg.fileName}</span>
+                                  </div>
+                                  {msg.text && <p className="text-sm text-slate-800 mt-2">{msg.text}</p>}
+                                </div>
+                              )}
+                              {msg.type === "file" && (
+                                <div className="flex flex-col mb-1 min-w-[200px]">
+                                  <div className="flex items-center space-x-3 bg-white/50 p-3 rounded-lg border border-slate-200/50 mb-2 hover:bg-white transition-colors cursor-pointer" onClick={() => window.open(msg.fileUrl, '_blank')}>
+                                    <FileIcon className="w-8 h-8 text-slate-500 shrink-0" />
+                                    <span className="text-sm font-medium text-slate-800 truncate" title={msg.fileName}>{msg.fileName}</span>
+                                  </div>
+                                  {msg.text && <p className="text-sm text-slate-800 mt-2">{msg.text}</p>}
+                                </div>
+                              )}
+                              
+                              <div className="flex items-center justify-end mt-1 space-x-1">
+                                <span className="text-[10px] text-slate-400">{formatTime(msg.time)}</span>
+                              </div>
+                            </div>
+                          </div>
+                        ))}
                       </div>
                     ))
                   )}
@@ -542,7 +584,7 @@ export function Chat() {
                         </div>
                         <p className="text-xs text-slate-600 line-clamp-2">{ticket.lastMessage}</p>
                         <div className="mt-3 text-[10px] text-slate-400 text-right">
-                          Última interação: {ticket.time}
+                          Última interação: {formatTime(ticket.time)}
                         </div>
                       </div>
                     ))}

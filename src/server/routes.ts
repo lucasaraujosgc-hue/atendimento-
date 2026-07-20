@@ -158,7 +158,7 @@ apiRouter.get("/tickets", async (req, res) => {
       id: t.id,
       name: t.contactName || "Desconhecido",
       lastMessage: t.lastMessage,
-      time: new Date(t.updatedAt || "").toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+      time: t.updatedAt,
       unread: 0, // Calculate later based on messages
       status: t.status,
       slaStatus: t.slaStatus,
@@ -181,7 +181,7 @@ apiRouter.get("/tickets/:id/messages", async (req, res) => {
       id: m.id,
       senderName: m.senderName,
       text: m.body,
-      time: new Date(m.createdAt || "").toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+      time: m.createdAt,
       isMe: m.fromMe,
       type: m.mediaType || "text",
       fileUrl: m.mediaUrl,

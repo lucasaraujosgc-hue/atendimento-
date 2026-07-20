@@ -31,6 +31,9 @@ export async function initWhatsApp(io: any) {
       auth: state,
       printQRInTerminal: false,
       logger: pino({ level: "error" }) as any,
+      browser: ["Atendimento", "Chrome", "20.0.0"],
+      markOnlineOnConnect: true,
+      syncFullHistory: false
     });
 
     sock.ev.on("connection.update", (update: any) => {
@@ -106,11 +109,9 @@ export async function initWhatsApp(io: any) {
     });
 
     sock.ev.on("messages.upsert", async (m: any) => {
-      if (m.type === "notify" || m.type === "append") {
-        for (const msg of m.messages) {
-          if (msg.key.remoteJid && isValidContact(msg.key.remoteJid)) {
-             await handleIncomingMessage(msg, io, false);
-          }
+      for (const msg of m.messages) {
+        if (msg.key.remoteJid && isValidContact(msg.key.remoteJid)) {
+           await handleIncomingMessage(msg, io, false);
         }
       }
     });
@@ -149,7 +150,10 @@ async function handleIncomingMessage(msg: any, io: any, isHistory: boolean = fal
     } else {
       let updated = false;
       let newName = contact.name;
-      if (senderName && senderName !== normalizedJid.split('@')[0] && (contact.name === normalizedJid.split('@')[0] || contact.name === 'Desconhecido')) {
+      if (msg.pushName && msg.pushName !== contact.name) {
+        newName = msg.pushName;
+        updated = true;
+      } else if (senderName && senderName !== normalizedJid.split('@')[0] && (contact.name === normalizedJid.split('@')[0] || contact.name === 'Desconhecido')) {
         newName = senderName;
         updated = true;
       }
