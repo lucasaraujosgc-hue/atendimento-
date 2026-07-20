@@ -129,19 +129,41 @@ async function handleIncomingMessage(msg: any, io: any, isHistory: boolean = fal
     
     // Get or create contact
     let contact = await db.select().from(contacts).where(eq(contacts.number, normalizedJid)).then(res => res[0]);
-    if (!contact) {
-      let profilePicUrl = undefined;
+    
+    let profilePicUrl = contact?.profilePicUrl;
+    if (!profilePicUrl && !isHistory) {
       try {
-        if (!isHistory) profilePicUrl = await sock.profilePictureUrl(normalizedJid, 'image');
+        profilePicUrl = await sock.profilePictureUrl(normalizedJid, 'image');
       } catch (err) {
         // Ignore if no profile picture
       }
+    }
+
+    if (!contact) {
       const [newContact] = await db.insert(contacts).values({
         name: senderName,
         number: normalizedJid,
         profilePicUrl
       }).returning();
       contact = newContact;
+    } else {
+      let updated = false;
+      let newName = contact.name;
+      if (senderName && senderName !== normalizedJid.split('@')[0] && (contact.name === normalizedJid.split('@')[0] || contact.name === 'Desconhecido')) {
+        newName = senderName;
+        updated = true;
+      }
+      if (profilePicUrl && profilePicUrl !== contact.profilePicUrl) {
+        updated = true;
+      }
+      
+      if (updated) {
+        const [updatedContact] = await db.update(contacts).set({
+          name: newName,
+          profilePicUrl
+        }).where(eq(contacts.id, contact.id)).returning();
+        contact = updatedContact;
+      }
     }
 
     // Get or create open ticket

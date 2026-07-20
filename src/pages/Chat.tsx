@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { Search, MoreVertical, Forward, Tag, Send, Paperclip, Smile, LayoutList, LayoutGrid, Clock, AlertTriangle, X, FileText, Image as ImageIcon, Music, Play, File as FileIcon, Loader2, MessageSquareOff } from "lucide-react";
 import { io, Socket } from "socket.io-client";
 
@@ -48,6 +48,26 @@ export function Chat() {
   
   const selectedTicketRef = useRef<number | null>(selectedTicket);
   const socketRef = useRef<Socket | null>(null);
+
+  const [isDragActive, setIsDragActive] = useState(false);
+
+  const handleDragOver = (e: React.DragEvent) => {
+    e.preventDefault();
+    setIsDragActive(true);
+  };
+
+  const handleDragLeave = (e: React.DragEvent) => {
+    e.preventDefault();
+    setIsDragActive(false);
+  };
+
+  const handleDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    setIsDragActive(false);
+    if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+      setAttachments(prev => [...prev, ...Array.from(e.dataTransfer.files)]);
+    }
+  };
 
   useEffect(() => {
     selectedTicketRef.current = selectedTicket;
@@ -136,7 +156,7 @@ export function Chat() {
     if (attachments.length > 0) {
       for (const file of attachments) {
         const formData = new FormData();
-        formData.append("file", file);
+        formData.append("files", file);
         if (messageText) {
           formData.append("text", finalMessage);
         }
@@ -295,7 +315,21 @@ export function Chat() {
           </section>
 
           {/* Área de Mensagens */}
-          <main className={`${selectedTicket ? 'flex' : 'hidden'} md:flex flex-1 flex-col bg-[#efeae2]`}>
+          <main 
+            className={`${selectedTicket ? 'flex' : 'hidden'} md:flex flex-1 flex-col bg-[#efeae2] relative`}
+            onDragOver={handleDragOver}
+            onDragLeave={handleDragLeave}
+            onDrop={handleDrop}
+          >
+            {isDragActive && (
+              <div className="absolute inset-0 z-50 bg-green-500/10 backdrop-blur-sm border-4 border-dashed border-green-500 rounded-lg flex items-center justify-center pointer-events-none m-4">
+                <div className="bg-white p-6 rounded-2xl shadow-xl flex flex-col items-center">
+                  <Paperclip className="w-12 h-12 text-green-500 mb-3" />
+                  <h3 className="text-xl font-bold text-slate-800">Solte seus arquivos aqui</h3>
+                  <p className="text-slate-500 mt-1">Eles serão anexados à mensagem</p>
+                </div>
+              </div>
+            )}
             {selectedTicket ? (
               <>
                 <header className="h-16 bg-white border-b border-slate-200 flex items-center justify-between px-4 md:px-6 shrink-0 shadow-sm z-10">

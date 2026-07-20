@@ -56,7 +56,7 @@ apiRouter.post("/login", async (req, res) => {
     const token = jwt.sign(
       { id: user.id, email: user.email, profile: user.profile, nickname: user.nickname, name: user.name },
       JWT_SECRET,
-      { expiresIn: process.env.JWT_EXPIRES_IN || "1d" }
+      { expiresIn: (process.env.JWT_EXPIRES_IN || "1d") as any }
     );
 
     res.json({ token, user: { id: user.id, name: user.name, email: user.email, profile: user.profile, nickname: user.nickname } });
@@ -102,6 +102,27 @@ apiRouter.post("/users", async (req, res) => {
     res.json(result[0]);
   } catch (err) {
     res.status(400).json({ error: "Erro ao criar usuário" });
+  }
+});
+
+apiRouter.put("/users/:id", async (req, res) => {
+  const { name, email, password, profile, nickname, active } = req.body;
+  try {
+    const updateData: any = { name, email, profile, nickname, active };
+    if (password) {
+      updateData.password = await bcrypt.hash(password, 10);
+    }
+    const result = await db.update(users).set(updateData).where(eq(users.id, parseInt(req.params.id))).returning({
+      id: users.id,
+      name: users.name,
+      email: users.email,
+      profile: users.profile,
+      nickname: users.nickname,
+      active: users.active
+    });
+    res.json(result[0]);
+  } catch (err) {
+    res.status(400).json({ error: "Erro ao atualizar usuário" });
   }
 });
 

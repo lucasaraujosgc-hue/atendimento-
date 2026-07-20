@@ -1,5 +1,5 @@
-import { useState, useEffect } from "react";
-import { Users as UsersIcon, Plus } from "lucide-react";
+import React, { useState, useEffect } from "react";
+import { Users as UsersIcon, Plus, Edit2 } from "lucide-react";
 
 type User = {
   id: number;
@@ -13,12 +13,14 @@ type User = {
 export function Users() {
   const [users, setUsers] = useState<User[]>([]);
   const [showAddForm, setShowAddForm] = useState(false);
+  const [editingUserId, setEditingUserId] = useState<number | null>(null);
   const [formData, setFormData] = useState({
     name: "",
     nickname: "",
     email: "",
     password: "",
-    profile: "Atendente"
+    profile: "Atendente",
+    active: true
   });
 
   const fetchUsers = async () => {
@@ -38,17 +40,39 @@ export function Users() {
   const handleAddUser = async (e: React.FormEvent) => {
     e.preventDefault();
     try {
-      await fetch("/api/users", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(formData)
-      });
+      if (editingUserId) {
+        await fetch(`/api/users/${editingUserId}`, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(formData)
+        });
+      } else {
+        await fetch("/api/users", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(formData)
+        });
+      }
       setShowAddForm(false);
-      setFormData({ name: "", nickname: "", email: "", password: "", profile: "Atendente" });
+      setEditingUserId(null);
+      setFormData({ name: "", nickname: "", email: "", password: "", profile: "Atendente", active: true });
       fetchUsers();
     } catch (err) {
       console.error(err);
     }
+  };
+
+  const handleEdit = (user: User) => {
+    setFormData({
+      name: user.name,
+      nickname: user.nickname || "",
+      email: user.email,
+      password: "", // Do not fill password on edit
+      profile: user.profile,
+      active: user.active
+    });
+    setEditingUserId(user.id);
+    setShowAddForm(true);
   };
 
   return (
@@ -91,7 +115,7 @@ export function Users() {
               </div>
               <div>
                 <label className="block text-sm font-medium text-slate-700">Senha</label>
-                <input required type="password" value={formData.password} onChange={e => setFormData({...formData, password: e.target.value})} className="mt-1 block w-full rounded-md border-slate-300 shadow-sm focus:border-green-500 focus:ring-green-500 sm:text-sm p-2 border" />
+                <input required={!editingUserId} type="password" value={formData.password} onChange={e => setFormData({...formData, password: e.target.value})} className="mt-1 block w-full rounded-md border-slate-300 shadow-sm focus:border-green-500 focus:ring-green-500 sm:text-sm p-2 border" placeholder={editingUserId ? "Deixe em branco para não alterar" : ""} />
               </div>
               <div>
                 <label className="block text-sm font-medium text-slate-700">Perfil</label>
@@ -101,9 +125,17 @@ export function Users() {
                   <option>Administrador</option>
                 </select>
               </div>
+              {editingUserId && (
+                <div className="flex items-center mt-6">
+                  <input id="active-checkbox" type="checkbox" checked={formData.active} onChange={e => setFormData({...formData, active: e.target.checked})} className="h-4 w-4 text-green-600 focus:ring-green-500 border-slate-300 rounded" />
+                  <label htmlFor="active-checkbox" className="ml-2 block text-sm text-slate-900">
+                    Usuário Ativo
+                  </label>
+                </div>
+              )}
             </div>
             <div className="flex justify-end space-x-3 mt-4">
-              <button type="button" onClick={() => setShowAddForm(false)} className="px-4 py-2 text-sm font-medium text-slate-700 bg-white border border-slate-300 rounded-md shadow-sm hover:bg-slate-50 focus:outline-none">Cancelar</button>
+              <button type="button" onClick={() => { setShowAddForm(false); setEditingUserId(null); }} className="px-4 py-2 text-sm font-medium text-slate-700 bg-white border border-slate-300 rounded-md shadow-sm hover:bg-slate-50 focus:outline-none">Cancelar</button>
               <button type="submit" className="px-4 py-2 text-sm font-medium text-white bg-green-600 border border-transparent rounded-md shadow-sm hover:bg-green-700 focus:outline-none">Salvar</button>
             </div>
           </form>
@@ -132,6 +164,9 @@ export function Users() {
                     <th scope="col" className="px-3 py-3.5 text-left text-sm font-semibold text-slate-900">
                       Status
                     </th>
+                    <th scope="col" className="relative py-3.5 pl-3 pr-4 sm:pr-6">
+                      <span className="sr-only">Editar</span>
+                    </th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-200 bg-white">
@@ -157,6 +192,11 @@ export function Users() {
                         }`}>
                           {person.active ? 'Ativo' : 'Inativo'}
                         </span>
+                      </td>
+                      <td className="relative whitespace-nowrap py-4 pl-3 pr-4 text-right text-sm font-medium sm:pr-6">
+                        <button onClick={() => handleEdit(person)} className="text-green-600 hover:text-green-900" title="Editar Usuário">
+                          <Edit2 className="w-4 h-4" />
+                        </button>
                       </td>
                     </tr>
                   ))}
